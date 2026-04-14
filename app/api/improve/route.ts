@@ -4,25 +4,14 @@ import { ImproveResponse, Violation } from "@/lib/types";
 
 const client = new Anthropic();
 
-function buildImprovePrompt(violations: Violation[]): string {
-  const violationList = violations
-    .map(
-      (v, i) =>
-        `${i + 1}. [${v.wcag_criterion} - ${v.wcag_name}] ${v.description}. Fix: ${v.fix}${
-          v.suggested_color ? ` Use color: ${v.suggested_color}` : ""
-        }`
-    )
-    .join("\n");
+// Static instructions — eligible for prompt caching
+const IMPROVE_SYSTEM_PROMPT = `You are an expert UI developer and accessibility specialist.
+You will receive a design image and a list of WCAG 2.2 accessibility violations.
+Your task is to create a complete HTML/CSS recreation of the design with ALL violations fixed.
 
-  return `You are an expert UI developer and accessibility specialist.
-
-I'm providing a design image that has the following WCAG 2.2 accessibility violations:
-
-${violationList}
-
-Create a complete HTML/CSS recreation of this design with ALL violations fixed. Requirements:
+Requirements:
 - Faithfully recreate the visual design and layout from the image
-- Fix every violation listed above
+- Fix every violation listed in the user message
 - Use semantic HTML5 elements
 - Include inline CSS styles (no external stylesheets needed)
 - Ensure proper color contrast ratios (minimum 4.5:1 for AA, 7:1 for AAA where applicable)
@@ -32,6 +21,18 @@ Create a complete HTML/CSS recreation of this design with ALL violations fixed. 
 - The HTML should be self-contained and render correctly in a browser iframe
 
 Respond with ONLY the complete HTML document. No explanation. No markdown. Just the raw HTML starting with <!DOCTYPE html>.`;
+
+function buildViolationList(violations: Violation[]): string {
+  const violationList = violations
+    .map(
+      (v, i) =>
+        `${i + 1}. [${v.wcag_criterion} - ${v.wcag_name}] ${v.description}. Fix: ${v.fix}${
+          v.suggested_color ? ` Use color: ${v.suggested_color}` : ""
+        }`
+    )
+    .join("\n");
+
+  return `The design image has the following WCAG 2.2 accessibility violations to fix:\n\n${violationList}\n\nRecreate the design as a complete, accessible HTML document.`;
 }
 
 export async function POST(req: NextRequest) {
@@ -50,6 +51,13 @@ export async function POST(req: NextRequest) {
     const response = await client.messages.create({
       model: "claude-sonnet-4-5",
       max_tokens: 8192,
+      system: [
+        {
+          type: "text",
+          text: IMPROVE_SYSTEM_PROMPT,
+          cache_control: { type: "ephemeral" },
+        },
+      ],
       messages: [
         {
           role: "user",
@@ -64,7 +72,7 @@ export async function POST(req: NextRequest) {
             },
             {
               type: "text",
-              text: buildImprovePrompt(violations),
+              text: buildViolationList(violations),
             },
           ],
         },
